@@ -1,4 +1,5 @@
 import { useState } from "react";
+const API_BASE = import.meta.env.VITE_API_URL;
 
 export default function ConfirmationForm({ extractedData, onValidated }) {
   const [formData, setFormData] = useState(extractedData || {});
@@ -52,7 +53,7 @@ export default function ConfirmationForm({ extractedData, onValidated }) {
 
       console.log("Sending to backend:", cleanedData); // 👈 Debug
 
-      const response = await fetch("http://127.0.0.1:8000/validate", {
+      const response = await fetch(`${API_BASE}/validate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -1,5 +1,5 @@
 import { useState } from "react";
-
+const API_BASE = import.meta.env.VITE_API_URL;
 export default function UploadForm({ onSuccess }) {
   const [cmr, setCmr] = useState(null);
   const [invoice, setInvoice] = useState(null);
@@ -25,7 +25,7 @@ export default function UploadForm({ onSuccess }) {
     try {
       setLoading(true);
 
-      const response = await fetch("http://127.0.0.1:8000/extract", {
+      const response = await fetch(`${API_BASE}/extract`, {
         method: "POST",
         body: formData,
       });
