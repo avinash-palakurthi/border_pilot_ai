@@ -59,7 +59,12 @@
 #     return content.strip()
 
 
+# 
+
+
+# import os
 import os
+from typing import Dict, List, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -68,143 +73,107 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def generate_compliance_explanation(data, issues, warnings, vies_results=None):
+REGULATION_MAP = {
+    "vat_intra_eu": "Directive 2006/112/EC (EU VAT Directive)",
+    "dangerous_goods_road": "ADR Agreement as implemented by Directive 2008/68/EC",
+    "customs_union": "Union Customs Code (Regulation (EU) No 952/2013)"
+}
 
-    # Determine overall status
-    if not issues and not warnings:
-        status = "COMPLIANT"
-    elif issues:
-        status = "NON-COMPLIANT"
-    else:
-        status = "NEEDS REVIEW"
 
-    # Dynamic section title — fixed to include warnings
-    if not issues and not warnings:
-        compliance_section = "Why Shipment Is Compliant"
-    elif issues:
-        compliance_section = "Why Shipment Is Non-Compliant"
-    else:
-        compliance_section = "Why Shipment Requires Attention"
+def determine_status(issues: List[str], warnings: List[str]) -> str:
+    if issues:
+        return "NON-COMPLIANT"
+    if warnings:
+        return "NEEDS REVIEW"
+    return "COMPLIANT"
 
-    # Build VIES context
-    vies_context = "Not performed"
-    if vies_results:
-        shipper = vies_results.get("shipper", {})
-        receiver = vies_results.get("receiver", {})
-        vies_context = f"""Shipper VAT: {shipper.get('vat')} — VIES Status: {shipper.get('status')}
-Receiver VAT: {receiver.get('vat')} — VIES Status: {receiver.get('status')}"""
 
-    prompt = f"""
-You are an EU customs compliance expert.
+def build_vies_context(vies_results: Optional[Dict]) -> str:
+    if not vies_results:
+        return "Not performed"
 
-Return a SHORT and CLEAR compliance summary.
+    shipper = vies_results.get("shipper", {})
+    receiver = vies_results.get("receiver", {})
 
-IMPORTANT RULES:
-- Do NOT use markdown symbols (#, *, -, etc.)
-- Do NOT use bullet points
-- Do NOT use numbering
-- Use simple section titles followed by colon
-- Keep response under 250 words
-- Keep language professional and direct
-- VIES VAT verification is already completed — trust the results below, do NOT re-assess VAT validity
-- Overall status is already determined — align your assessment with it exactly
-
-Overall Status: {status}
-
-VAT Verification (VIES) — Already Confirmed:
-{vies_context}
-
-Shipment:
-{data}
-
-Issues (empty means no issues):
-{issues if issues else "None"}
-
-Warnings (empty means no warnings):
-{warnings if warnings else "None"}
-
-Format exactly like this:
-
-Regulation Reference:
-Short explanation.
-
-{compliance_section}:
-Short explanation based on the actual issues and warnings above.
-
-Possible Consequences:
-Short explanation.
-
-Recommended Action:
-Short explanation.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a strict EU customs compliance expert. "
-                    "Always trust pre-verified VIES results provided to you. "
-                    "Do not re-assess VAT validity. "
-                    "Align your assessment exactly with the overall status provided."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.1,
+    return (
+        f"Shipper VAT: {shipper.get('vat', 'N/A')} — "
+        f"VIES Status: {shipper.get('status', 'N/A')}\n"
+        f"Receiver VAT: {receiver.get('vat', 'N/A')} — "
+        f"VIES Status: {receiver.get('status', 'N/A')}"
     )
 
-    content = response.choices[0].message.content or ""
-    return content.strip()
 
-    # Determine overall status
-    if not issues and not warnings:
-        status = "COMPLIANT"
-    elif issues:
-        status = "NON-COMPLIANT"
-    else:
-        status = "NEEDS REVIEW"
+def infer_shipment_type(shipment_data: Dict) -> str:
+    """
+    Basic deterministic inference.
+    You can expand this later.
+    """
+    if shipment_data.get("un_number"):
+        return "dangerous_goods_road"
 
-    # Dynamic section title
+    if shipment_data.get("intra_eu") is True:
+        return "vat_intra_eu"
+
+    return "customs_union"
+
+
+def select_regulation(shipment_type: str) -> str:
+    return REGULATION_MAP.get(
+        shipment_type,
+        "Relevant EU regulatory framework"
+    )
+
+
+def generate_compliance_explanation(
+    shipment_data: Dict,
+    issues: List[str],
+    warnings: List[str],
+    vies_results: Optional[Dict] = None,
+    shipment_type: Optional[str] = None
+) -> str:
+
+    status = determine_status(issues, warnings)
+
+    # If shipment_type not provided, infer it safely
+    if not shipment_type:
+        shipment_type = infer_shipment_type(shipment_data)
+
+    regulation_reference = select_regulation(shipment_type)
+    vies_context = build_vies_context(vies_results)
+
     compliance_section = (
-        "Why Shipment Is Non-Compliant" if issues else "Why Shipment Is Compliant"
+        "Why Shipment Is Non-Compliant"
+        if status == "NON-COMPLIANT"
+        else "Why Shipment Requires Attention"
+        if status == "NEEDS REVIEW"
+        else "Why Shipment Is Compliant"
     )
 
-    # Build VIES context
-    vies_context = "Not performed"
-    if vies_results:
-        shipper = vies_results.get("shipper", {})
-        receiver = vies_results.get("receiver", {})
-        vies_context = f"""Shipper VAT: {shipper.get('vat')} — VIES Status: {shipper.get('status')}
-Receiver VAT: {receiver.get('vat')} — VIES Status: {receiver.get('status')}"""
-
     prompt = f"""
-You are an EU customs compliance expert.
-
-Return a SHORT and CLEAR compliance summary.
+You are a strict EU compliance expert.
 
 IMPORTANT RULES:
-- Do NOT use markdown symbols (#, *, -, etc.)
-- Do NOT use bullet points
-- Do NOT use numbering
-- Use simple section titles followed by colon
-- Keep response under 250 words
-- Keep language professional and direct
-- VIES VAT verification is already completed — trust the results below, do NOT re-assess VAT validity
+- Use ONLY the regulation provided
+- Do NOT invent legal references
+- Do NOT override system compliance status
+- Keep response under 220 words
+- No markdown, no bullets, no numbering
 
 Overall Status: {status}
+
+Regulation To Use:
+{regulation_reference}
 
 VAT Verification (VIES) — Already Confirmed:
 {vies_context}
 
-Shipment:
-{data}
+Shipment Data:
+{shipment_data}
 
-Issues (empty means no issues):
+Issues:
 {issues if issues else "None"}
 
-Warnings (empty means no warnings):
+Warnings:
 {warnings if warnings else "None"}
 
 Format exactly like this:
@@ -222,17 +191,27 @@ Recommended Action:
 Short explanation.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a strict EU customs compliance expert. Always trust pre-verified VIES results provided to you. Do not re-assess VAT validity.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.1,
-    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a deterministic EU compliance expert. "
+                        "Never invent regulations. "
+                        "Never override provided compliance status."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+        )
 
-    content = response.choices[0].message.content or ""
-    return content.strip()
+        return (response.choices[0].message.content or "").strip()
+
+    except Exception:
+        return (
+            "Compliance explanation unavailable due to a temporary system issue. "
+            "Please review shipment manually."
+        )
